@@ -1,6 +1,6 @@
 import os
 import sys
-from rag_example.nebula_client import NebulaBlockClient
+from nebularag.clients.nebula_client import NebulaBlockClient
 import json
 
 
