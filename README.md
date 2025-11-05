@@ -5,6 +5,7 @@ A minimal, dependency-light RAG (Retrieval-Augmented Generation) pipeline design
 ## 🚀 Features
 
 - **Lightweight**: Minimal dependencies, no heavy ML frameworks
+- **PDF Support**: Read and process PDF documents directly
 - **Configurable**: Environment-based configuration for all endpoints and models
 - **OpenAI-Compatible**: Works with OpenAI-compatible APIs
 - **Complete Pipeline**: Document splitting → embedding → retrieval → reranking → generation
@@ -94,7 +95,9 @@ rag-example/
 
 ### Basic Usage
 
-1. **Prepare your documents**: Place `.txt` or `.md` files in a directory (e.g., `docs/`)
+1. **Prepare your documents**: Place `.txt`, `.md`, or `.pdf` files in a directory (e.g., `docs/`)
+   - ✅ Supported formats: `.txt`, `.md`, `.pdf`
+   - 📚 Perfect for studying with PDF textbooks or documentation
 
 2. **Set up environment**: Copy `.env.example` to `.env` and fill in your API credentials
 
@@ -102,6 +105,17 @@ rag-example/
    ```bash
    nebularag --docs docs --question "What does the guide say about X?"
    ```
+
+### Using with PDF Files (e.g., ISTQB Study Materials)
+
+```bash
+# Example: Study ISTQB Foundation Level
+# 1. Place your ISTQB PDF in the docs folder
+# 2. Ask questions about the content
+nebularag --docs docs --question "What are the 7 testing principles in ISTQB?"
+nebularag --docs docs --question "Explain black box testing techniques"
+nebularag --docs docs --question "What is the difference between verification and validation?"
+```
 
 ### Advanced Usage
 
@@ -140,7 +154,8 @@ python scripts/test_nebula.py
 ### RAG Pipeline Flow
 
 1. **Document Processing**: 
-   - Reads `.txt` and `.md` files from the specified directory
+   - Reads `.txt`, `.md`, and `.pdf` files from the specified directory
+   - Extracts text from PDFs using PyPDF2
    - Splits documents into overlapping chunks (default: 800 chars, 120 overlap)
 
 2. **Indexing**:
@@ -255,7 +270,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 1. **ModuleNotFoundError**: Make sure you've installed the package with `pip install -e .`
 2. **API Key Error**: Verify your `NEBULABLOCK_API_KEY` is set correctly
 3. **Connection Error**: Check your `NEBULABLOCK_BASE_URL` and internet connection
-4. **Empty Results**: Ensure your documents directory contains `.txt` or `.md` files
+4. **Empty Results**: Ensure your documents directory contains `.txt`, `.md`, or `.pdf` files
+5. **PDF Not Loading**: If you see "PyPDF2 not installed", run `pip install PyPDF2>=3.0.0`
 
 ### Getting Help
 

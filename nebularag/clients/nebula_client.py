@@ -71,7 +71,7 @@ class NebulaBlockClient:
         self.timeout = timeout
 
     # ------------------------------ HTTP ------------------------------ #
-    def _request(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _request(self, path: str, payload: Dict[str, Any], max_retries: int = 3) -> Dict[str, Any]:
         if not self.base_url:
             raise RuntimeError("NEBULABLOCK_BASE_URL is not set.")
         if not self.api_key:
@@ -79,66 +79,83 @@ class NebulaBlockClient:
 
         url = f"{self.base_url}{path}"
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, method="POST")
         
-        # Add headers to make the request look more legitimate
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Bearer {self.api_key}")
-        req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        req.add_header("Accept", "application/json")
-        req.add_header("Accept-Language", "en-US,en;q=0.9")
-        req.add_header("Accept-Encoding", "gzip, deflate, br")
-        req.add_header("Connection", "keep-alive")
-        req.add_header("Sec-Fetch-Dest", "empty")
-        req.add_header("Sec-Fetch-Mode", "cors")
-        req.add_header("Sec-Fetch-Site", "cross-site")
-
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                body = resp.read()
-                
-                # Check if response is compressed and decompress accordingly
-                content_encoding = resp.headers.get('Content-Encoding', '').lower()
-                
-                if content_encoding == 'br' and BROTLI_AVAILABLE:
-                    try:
-                        body = brotli.decompress(body)
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to decompress Brotli response: {e}")
-                elif content_encoding == 'gzip' or body.startswith(b'\x1f\x8b'):
-                    try:
-                        body = gzip.decompress(body)
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to decompress gzip response: {e}")
-                elif content_encoding == 'br' and not BROTLI_AVAILABLE:
-                    raise RuntimeError("Response is Brotli compressed but brotli library is not available. Install with: pip install brotli")
-                
-                # Try to decode with UTF-8, fallback to latin-1 if that fails
-                try:
-                    text = body.decode("utf-8")
-                except UnicodeDecodeError:
-                    text = body.decode("latin-1")
-                
-                # Debug: print response details if it's not valid JSON
-                if not text.strip():
-                    raise RuntimeError(f"Empty response from {url}")
-                
-                try:
-                    return json.loads(text)
-                except json.JSONDecodeError as e:
-                    # If it's not JSON, show what we actually got
-                    raise RuntimeError(f"Invalid JSON response from {url}. Response: {text[:200]}...")
-        except urllib.error.HTTPError as e:
+        # Create an SSL context that's more tolerant
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        last_error = None
+        for attempt in range(max_retries):
             try:
-                detail = e.read().decode("utf-8", errors="ignore")
-            except UnicodeDecodeError:
-                detail = e.read().decode("latin-1", errors="ignore")
-            # Add a small delay on error to avoid rapid retries
-            time.sleep(0.5)
-            raise RuntimeError(f"HTTPError {e.code} for {url}: {detail}")
-        except urllib.error.URLError as e:
-            time.sleep(0.5)
-            raise RuntimeError(f"URLError for {url}: {e}")
+                req = urllib.request.Request(url, data=data, method="POST")
+                
+                # Add headers
+                req.add_header("Content-Type", "application/json")
+                req.add_header("Authorization", f"Bearer {self.api_key}")
+                req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+                req.add_header("Accept", "application/json")
+                req.add_header("Accept-Encoding", "gzip, deflate, br")
+                req.add_header("Connection", "keep-alive")
+                
+                with urllib.request.urlopen(req, timeout=self.timeout, context=ssl_context) as resp:
+                    body = resp.read()
+                    
+                    # Check if response is compressed and decompress accordingly
+                    content_encoding = resp.headers.get('Content-Encoding', '').lower()
+                    
+                    if content_encoding == 'br' and BROTLI_AVAILABLE:
+                        try:
+                            body = brotli.decompress(body)
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to decompress Brotli response: {e}")
+                    elif content_encoding == 'gzip' or body.startswith(b'\x1f\x8b'):
+                        try:
+                            body = gzip.decompress(body)
+                        except Exception as e:
+                            raise RuntimeError(f"Failed to decompress gzip response: {e}")
+                    elif content_encoding == 'br' and not BROTLI_AVAILABLE:
+                        raise RuntimeError("Response is Brotli compressed but brotli library is not available. Install with: pip install brotli")
+                    
+                    # Try to decode with UTF-8, fallback to latin-1 if that fails
+                    try:
+                        text = body.decode("utf-8")
+                    except UnicodeDecodeError:
+                        text = body.decode("latin-1")
+                    
+                    # Debug: print response details if it's not valid JSON
+                    if not text.strip():
+                        raise RuntimeError(f"Empty response from {url}")
+                    
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError as e:
+                        # If it's not JSON, show what we actually got
+                        raise RuntimeError(f"Invalid JSON response from {url}. Response: {text[:200]}...")
+                        
+            except urllib.error.HTTPError as e:
+                last_error = e
+                try:
+                    detail = e.read().decode("utf-8", errors="ignore")
+                except UnicodeDecodeError:
+                    detail = e.read().decode("latin-1", errors="ignore")
+                # Add exponential backoff delay
+                time.sleep(0.5 * (2 ** attempt))
+                if attempt == max_retries - 1:
+                    raise RuntimeError(f"HTTPError {e.code} for {url}: {detail}")
+                continue
+                
+            except urllib.error.URLError as e:
+                last_error = e
+                # Add exponential backoff delay
+                time.sleep(0.5 * (2 ** attempt))
+                if attempt == max_retries - 1:
+                    raise RuntimeError(f"URLError for {url}: {e}")
+                continue
+                
+        # If we get here, all retries failed
+        raise RuntimeError(f"Failed after {max_retries} attempts. Last error: {last_error}")
 
     # ---------------------------- Embeddings -------------------------- #
     def embed(self, texts: List[str]) -> List[List[float]]:
